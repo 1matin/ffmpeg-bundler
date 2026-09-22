@@ -55,8 +55,16 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $ff = (Resolve-Path "dist/windows-arm64/ffmpeg.exe").Path
+          $version = & $ff -version 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host $version
+            throw "ffmpeg.exe failed to launch (exit $LASTEXITCODE)"
+          }
+          Write-Host $version
           $enc = & $ff -hide_banner -encoders 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { Write-Host $enc; throw "ffmpeg -encoders failed (exit $LASTEXITCODE)" }
           $dec = & $ff -hide_banner -decoders 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { Write-Host $dec; throw "ffmpeg -decoders failed (exit $LASTEXITCODE)" }
           foreach ($e in @("libx264","h264_mf")) { if ($enc -notmatch "\b$e\b") { throw "Missing encoder $e" } }
           foreach ($e in @("h264_nvenc","h264_qsv","h264_amf")) { if ($enc -match "\b$e\b") { throw "Forbidden encoder present: $e" } }
           if ($dec -notmatch "\blibdav1d\b") { throw "Missing decoder libdav1d" }

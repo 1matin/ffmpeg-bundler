@@ -52,8 +52,19 @@ pushd "$WORK/ffmpeg-$TARGET"
 ./configure --prefix="$PREFIX/ffmpeg" --target-os=mingw32 --arch=aarch64 --cross-prefix=aarch64-w64-mingw32- --cc="$CC" --cxx="$CXX" --pkg-config=pkg-config --enable-cross-compile --enable-gpl --enable-libx264 --enable-libdav1d --enable-mediafoundation --disable-nvenc --disable-libvpl --disable-amf --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" --pkg-config-flags=--static --disable-ffplay --disable-debug
 make -j"$(nproc)" && make install
 popd
+
 cp "$PREFIX/ffmpeg/bin/ffmpeg.exe" "$PREFIX/ffmpeg/bin/ffprobe.exe" "$OUT/"
+
+# LLVM-MinGW links these runtime DLLs dynamically by default. Bundle every
+# non-system runtime DLL our ARM64 binaries import so they launch on a clean
+# Windows ARM64 machine.
+for dll in libc++.dll libunwind.dll; do
+  src="$(find "$TOOLROOT" -type f -iname "$dll" -print -quit)"
+  [[ -n "$src" ]] || { echo "Required runtime DLL not found: $dll"; exit 1; }
+  cp "$src" "$OUT/$dll"
+done
+
 write_manifest "$OUT" "$TARGET"
 collect_licenses "$OUT" "FFmpeg-GPL:$WORK/ffmpeg-$TARGET/COPYING.GPLv3" "x264-COPYING:$WORK/x264-$TARGET/COPYING" "dav1d-COPYING:$WORK/dav1d-$TARGET/COPYING"
 file "$OUT/ffmpeg.exe" >> "$OUT/build-info.txt"
-(cd "$OUT" && sha256sum ffmpeg.exe ffprobe.exe > SHA256SUMS)
+(cd "$OUT" && sha256sum ffmpeg.exe ffprobe.exe libc++.dll libunwind.dll > SHA256SUMS)
