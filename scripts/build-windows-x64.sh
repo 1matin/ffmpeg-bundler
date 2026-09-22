@@ -10,7 +10,7 @@ rm -rf "$PREFIX" "$OUT"; mkdir -p "$PREFIX" "$OUT"
 
 clone_checkout https://code.videolan.org/videolan/x264.git "$X264_COMMIT" "$WORK/x264-$TARGET"
 pushd "$WORK/x264-$TARGET"
-./configure --prefix="$PREFIX" --host=x86_64-w64-mingw32 --cross-prefix=x86_64-w64-mingw32- --enable-static --disable-shared --disable-cli
+./configure --prefix="$PREFIX" --enable-static --disable-cli
 make -j"$(nproc)" && make install
 popd
 
@@ -39,6 +39,6 @@ popd
 cp "$PREFIX/ffmpeg/bin/ffmpeg.exe" "$PREFIX/ffmpeg/bin/ffprobe.exe" "$OUT/"
 write_manifest "$OUT" "$TARGET"
 collect_licenses "$OUT" "FFmpeg-GPL:$WORK/ffmpeg-$TARGET/COPYING.GPLv3" "x264-COPYING:$WORK/x264-$TARGET/COPYING" "dav1d-COPYING:$WORK/dav1d-$TARGET/COPYING" "nv-codec-headers-LICENSE:$WORK/nv-codec-headers/LICENSE" "oneVPL-LICENSE:$WORK/libvpl-$TARGET/LICENSE"
-"$ROOT/scripts/verify.sh" "$OUT/ffmpeg.exe" "$TARGET" "$OUT/build-info.txt"
+bash "$ROOT/scripts/verify.sh" "$OUT/ffmpeg.exe" "$TARGET" "$OUT/build-info.txt"
 file "$OUT/ffmpeg.exe" >> "$OUT/build-info.txt"
 (cd "$OUT" && sha256sum ffmpeg.exe ffprobe.exe > SHA256SUMS)
