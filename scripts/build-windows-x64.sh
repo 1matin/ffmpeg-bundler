@@ -87,7 +87,7 @@ cp -R "$WORK/amf/amf/public/include/." "$PREFIX/include/AMF/"
 
 clone_checkout https://git.ffmpeg.org/ffmpeg.git "$FFMPEG_TAG" "$WORK/ffmpeg-$TARGET"
 pushd "$WORK/ffmpeg-$TARGET"
-if ! ./configure   --prefix="$PREFIX/ffmpeg"   --target-os=mingw32   --arch=x86_64   --enable-gpl   --enable-libx264   --enable-libdav1d   --enable-mediafoundation   --enable-libvpl   --enable-nvenc   --enable-amf   --extra-cflags="-I$PREFIX/include -I$PREFIX/include/AMF"   --extra-ldflags="-L$PREFIX/lib -static-libgcc -static-libstdc++"   --pkg-config-flags=--static   --disable-ffplay   --disable-debug; then
+if ! ./configure   --prefix="$PREFIX/ffmpeg"   --target-os=mingw32   --arch=x86_64   --enable-gpl   --enable-libx264   --enable-libdav1d   --enable-mediafoundation   --enable-libvpl   --enable-nvenc   --enable-amf   --extra-cflags="-I$PREFIX/include -I$PREFIX/include/AMF"   --extra-ldflags="-L$PREFIX/lib -static -static-libgcc -static-libstdc++"   --pkg-config-flags=--static   --disable-ffplay   --disable-debug; then
   echo "FFmpeg configure failed. Relevant config.log tail:"
   tail -n 250 ffbuild/config.log || true
   exit 1
@@ -108,8 +108,8 @@ for exe in ffmpeg.exe ffprobe.exe; do
     echo "PE imports for $exe:"
     objdump -p "$OUT/$exe" | grep -i "DLL Name:" || true
   } >> "$OUT/build-info.txt"
-  if objdump -p "$OUT/$exe" | grep -Ei "DLL Name:.*(libstdc\+\+|libgcc|libwinpthread|msys-2)" >/dev/null; then
-    echo "Unexpected MinGW/MSYS runtime dependency in $exe"
+  if objdump -p "$OUT/$exe" | grep -Ei "DLL Name:.*(libstdc\+\+|libgcc|libwinpthread|msys-2|libbz2|libiconv|liblzma|zlib)" >/dev/null; then
+    echo "Unexpected non-system runtime dependency in $exe"
     objdump -p "$OUT/$exe" | grep -i "DLL Name:"
     exit 1
   fi
