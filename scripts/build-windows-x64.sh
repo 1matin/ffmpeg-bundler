@@ -26,12 +26,23 @@ clone_checkout https://github.com/FFmpeg/nv-codec-headers.git "$NV_CODEC_HEADERS
 make -C "$WORK/nv-codec-headers" PREFIX="$PREFIX" install
 
 clone_checkout https://github.com/intel/libvpl.git "$LIBVPL_VERSION" "$WORK/libvpl-$TARGET"
-git -C "$WORK/libvpl-$TARGET" apply --check "$ROOT/patches/libvpl-mingw-msvc-guard.patch"
-git -C "$WORK/libvpl-$TARGET" apply "$ROOT/patches/libvpl-mingw-msvc-guard.patch"
-cmake -S "$WORK/libvpl-$TARGET" -B "$WORK/libvpl-$TARGET/build" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
-  -DBUILD_SHARED_LIBS=OFF
+
+# oneVPL's Windows compatibility header treats an undefined _MSC_VER as zero,
+# which incorrectly enables a pre-MSVC-2005 fallback when building with MinGW.
+# Make the guard explicitly MSVC-only. The exact source is pinned in versions.sh.
+python - "$WORK/libvpl-$TARGET/libvpl/src/windows/mfx_dispatcher_defs.h" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = "#if _MSC_VER < 1400"
+new = "#if defined(_MSC_VER) && _MSC_VER < 1400"
+if old not in s:
+    raise SystemExit(f"Expected oneVPL compatibility guard not found in {p}")
+p.write_text(s.replace(old, new, 1))
+PY
+
+cmake -S "$WORK/libvpl-$TARGET" -B "$WORK/libvpl-$TARGET/build" -G Ninja   -DCMAKE_BUILD_TYPE=Release   -DCMAKE_INSTALL_PREFIX="$PREFIX"   -DBUILD_SHARED_LIBS=OFF
 cmake --build "$WORK/libvpl-$TARGET/build" --parallel
 cmake --install "$WORK/libvpl-$TARGET/build"
 
@@ -46,8 +57,7 @@ int main() {
     return 0;
 }
 EOF
-c++ -O2 -static-libgcc -static-libstdc++ "$WORK/test-vpl.cpp" \
-  $(pkg-config --cflags --libs --static vpl) -o "$WORK/test-vpl.exe"
+c++ -O2 -static-libgcc -static-libstdc++ "$WORK/test-vpl.cpp"   $(pkg-config --cflags --libs --static vpl) -o "$WORK/test-vpl.exe"
 
 clone_checkout https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git "$AMF_VERSION" "$WORK/amf"
 mkdir -p "$PREFIX/include/AMF"
@@ -55,34 +65,14 @@ cp -R "$WORK/amf/amf/public/include/." "$PREFIX/include/AMF/"
 
 clone_checkout https://git.ffmpeg.org/ffmpeg.git "$FFMPEG_TAG" "$WORK/ffmpeg-$TARGET"
 pushd "$WORK/ffmpeg-$TARGET"
-./configure \
-  --prefix="$PREFIX/ffmpeg" \
-  --target-os=mingw32 \
-  --arch=x86_64 \
-  --enable-gpl \
-  --enable-libx264 \
-  --enable-libdav1d \
-  --enable-mediafoundation \
-  --enable-libvpl \
-  --enable-nvenc \
-  --enable-amf \
-  --extra-cflags="-I$PREFIX/include -I$PREFIX/include/AMF" \
-  --extra-ldflags="-L$PREFIX/lib -static-libgcc -static-libstdc++" \
-  --pkg-config-flags=--static \
-  --disable-ffplay \
-  --disable-debug
+./configure   --prefix="$PREFIX/ffmpeg"   --target-os=mingw32   --arch=x86_64   --enable-gpl   --enable-libx264   --enable-libdav1d   --enable-mediafoundation   --enable-libvpl   --enable-nvenc   --enable-amf   --extra-cflags="-I$PREFIX/include -I$PREFIX/include/AMF"   --extra-ldflags="-L$PREFIX/lib -static-libgcc -static-libstdc++"   --pkg-config-flags=--static   --disable-ffplay   --disable-debug
 make -j"$(nproc)"
 make install
 popd
 
 cp "$PREFIX/ffmpeg/bin/ffmpeg.exe" "$PREFIX/ffmpeg/bin/ffprobe.exe" "$OUT/"
 write_manifest "$OUT" "$TARGET"
-collect_licenses "$OUT" \
-  "FFmpeg-GPL:$WORK/ffmpeg-$TARGET/COPYING.GPLv3" \
-  "x264-COPYING:$WORK/x264-$TARGET/COPYING" \
-  "dav1d-COPYING:$WORK/dav1d-$TARGET/COPYING" \
-  "nv-codec-headers-LICENSE:$WORK/nv-codec-headers/LICENSE" \
-  "oneVPL-LICENSE:$WORK/libvpl-$TARGET/LICENSE"
+collect_licenses "$OUT"   "FFmpeg-GPL:$WORK/ffmpeg-$TARGET/COPYING.GPLv3"   "x264-COPYING:$WORK/x264-$TARGET/COPYING"   "dav1d-COPYING:$WORK/dav1d-$TARGET/COPYING"   "nv-codec-headers-LICENSE:$WORK/nv-codec-headers/LICENSE"   "oneVPL-LICENSE:$WORK/libvpl-$TARGET/LICENSE"
 
 bash "$ROOT/scripts/verify.sh" "$OUT/ffmpeg.exe" "$TARGET" "$OUT/build-info.txt"
 

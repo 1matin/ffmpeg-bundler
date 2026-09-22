@@ -38,33 +38,58 @@ EOF
 clone_checkout https://code.videolan.org/videolan/x264.git "$X264_COMMIT" "$WORK/x264-$TARGET"
 pushd "$WORK/x264-$TARGET"
 ./configure --prefix="$PREFIX" --host=aarch64-w64-mingw32 --cross-prefix=aarch64-w64-mingw32- --enable-static --disable-cli
-make -j"$(nproc)" && make install
+make -j"$(nproc)"
+make install
 popd
 
 clone_checkout https://code.videolan.org/videolan/dav1d.git "$DAV1D_VERSION" "$WORK/dav1d-$TARGET"
 pushd "$WORK/dav1d-$TARGET"
 meson setup build --wipe --cross-file "$CROSS" --prefix="$PREFIX" --default-library=static -Denable_tools=false -Denable_tests=false
-ninja -C build -j"$(nproc)" && ninja -C build install
+ninja -C build -j"$(nproc)"
+ninja -C build install
 popd
 
 clone_checkout https://git.ffmpeg.org/ffmpeg.git "$FFMPEG_TAG" "$WORK/ffmpeg-$TARGET"
 pushd "$WORK/ffmpeg-$TARGET"
 ./configure --prefix="$PREFIX/ffmpeg" --target-os=mingw32 --arch=aarch64 --cross-prefix=aarch64-w64-mingw32- --cc="$CC" --cxx="$CXX" --pkg-config=pkg-config --enable-cross-compile --enable-gpl --enable-libx264 --enable-libdav1d --enable-mediafoundation --disable-nvenc --disable-libvpl --disable-amf --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" --pkg-config-flags=--static --disable-ffplay --disable-debug
-make -j"$(nproc)" && make install
+make -j"$(nproc)"
+make install
 popd
 
 cp "$PREFIX/ffmpeg/bin/ffmpeg.exe" "$PREFIX/ffmpeg/bin/ffprobe.exe" "$OUT/"
 
-# LLVM-MinGW links these runtime DLLs dynamically by default. Bundle every
-# non-system runtime DLL our ARM64 binaries import so they launch on a clean
-# Windows ARM64 machine.
+# LLVM-MinGW ships runtime DLLs for several target architectures. Select the
+# ARM64 copies explicitly rather than whichever find(1) happens to encounter first.
 for dll in libc++.dll libunwind.dll; do
-  src="$(find "$TOOLROOT" -type f -iname "$dll" -print -quit)"
-  [[ -n "$src" ]] || { echo "Required runtime DLL not found: $dll"; exit 1; }
+  src=""
+  while IFS= read -r candidate; do
+    if file "$candidate" | grep -Eqi 'ARM64|AArch64'; then
+      src="$candidate"
+      break
+    fi
+  done < <(find "$TOOLROOT" -type f -iname "$dll" -print)
+
+  [[ -n "$src" ]] || {
+    echo "Could not find ARM64 runtime DLL: $dll"
+    find "$TOOLROOT" -type f -iname "$dll" -exec file {} ;
+    exit 1
+  }
+
   cp "$src" "$OUT/$dll"
+  file "$OUT/$dll" | tee -a "$OUT/runtime-dlls.txt"
+  file "$OUT/$dll" | grep -Eqi 'ARM64|AArch64' || {
+    echo "Wrong architecture bundled for $dll"
+    exit 1
+  }
 done
 
 write_manifest "$OUT" "$TARGET"
+{
+  echo
+  echo "Bundled runtime DLLs:"
+  cat "$OUT/runtime-dlls.txt"
+} >> "$OUT/build-info.txt"
 collect_licenses "$OUT" "FFmpeg-GPL:$WORK/ffmpeg-$TARGET/COPYING.GPLv3" "x264-COPYING:$WORK/x264-$TARGET/COPYING" "dav1d-COPYING:$WORK/dav1d-$TARGET/COPYING"
 file "$OUT/ffmpeg.exe" >> "$OUT/build-info.txt"
+file "$OUT/ffprobe.exe" >> "$OUT/build-info.txt"
 (cd "$OUT" && sha256sum ffmpeg.exe ffprobe.exe libc++.dll libunwind.dll > SHA256SUMS)
