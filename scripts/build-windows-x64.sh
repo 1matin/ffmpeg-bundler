@@ -47,17 +47,39 @@ cmake --build "$WORK/libvpl-$TARGET/build" --parallel
 cmake --install "$WORK/libvpl-$TARGET/build"
 
 test -f "$PREFIX/lib/pkgconfig/vpl.pc"
+
+# oneVPL is implemented in C++, but FFmpeg probes it with the C compiler.
+# Its MinGW pkg-config metadata omits libstdc++ for static consumers.
+python - "$PREFIX/lib/pkgconfig/vpl.pc" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+if "Libs.private:" not in s:
+    raise SystemExit(f"Libs.private missing from {p}")
+lines = []
+for line in s.splitlines():
+    if line.startswith("Libs.private:") and "-lstdc++" not in line:
+        line = line.rstrip() + " -lstdc++"
+    lines.append(line)
+p.write_text("\n".join(lines) + "\n")
+PY
+
 echo "oneVPL pkg-config version: $(pkg-config --modversion vpl)"
+echo "oneVPL static cflags: $(pkg-config --cflags --static vpl)"
 echo "oneVPL static libs: $(pkg-config --libs --static vpl)"
-cat > "$WORK/test-vpl.cpp" <<'EOF'
-#include <vpl/mfxdispatcher.h>
-int main() {
+
+# Mirror FFmpeg configure's oneVPL test using the C compiler.
+cat > "$WORK/test-vpl.c" <<'EOF'
+#include <mfxvideo.h>
+#include <mfxdispatcher.h>
+int main(void) {
     mfxLoader loader = MFXLoad();
     if (loader) MFXUnload(loader);
     return 0;
 }
 EOF
-c++ -O2 -static-libgcc -static-libstdc++ "$WORK/test-vpl.cpp"   $(pkg-config --cflags --libs --static vpl) -o "$WORK/test-vpl.exe"
+cc -O2 -static-libgcc -static-libstdc++ "$WORK/test-vpl.c" $(pkg-config --cflags --libs --static vpl) -o "$WORK/test-vpl.exe"
 
 clone_checkout https://github.com/GPUOpen-LibrariesAndSDKs/AMF.git "$AMF_VERSION" "$WORK/amf"
 mkdir -p "$PREFIX/include/AMF"
@@ -65,7 +87,11 @@ cp -R "$WORK/amf/amf/public/include/." "$PREFIX/include/AMF/"
 
 clone_checkout https://git.ffmpeg.org/ffmpeg.git "$FFMPEG_TAG" "$WORK/ffmpeg-$TARGET"
 pushd "$WORK/ffmpeg-$TARGET"
-./configure   --prefix="$PREFIX/ffmpeg"   --target-os=mingw32   --arch=x86_64   --enable-gpl   --enable-libx264   --enable-libdav1d   --enable-mediafoundation   --enable-libvpl   --enable-nvenc   --enable-amf   --extra-cflags="-I$PREFIX/include -I$PREFIX/include/AMF"   --extra-ldflags="-L$PREFIX/lib -static-libgcc -static-libstdc++"   --pkg-config-flags=--static   --disable-ffplay   --disable-debug
+if ! ./configure   --prefix="$PREFIX/ffmpeg"   --target-os=mingw32   --arch=x86_64   --enable-gpl   --enable-libx264   --enable-libdav1d   --enable-mediafoundation   --enable-libvpl   --enable-nvenc   --enable-amf   --extra-cflags="-I$PREFIX/include -I$PREFIX/include/AMF"   --extra-ldflags="-L$PREFIX/lib -static-libgcc -static-libstdc++"   --pkg-config-flags=--static   --disable-ffplay   --disable-debug; then
+  echo "FFmpeg configure failed. Relevant config.log tail:"
+  tail -n 250 ffbuild/config.log || true
+  exit 1
+fi
 make -j"$(nproc)"
 make install
 popd
