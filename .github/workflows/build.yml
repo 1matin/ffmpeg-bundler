@@ -1,0 +1,131 @@
+name: build-ffmpeg
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: write
+env:
+  FFMPEG_VERSION: "9.0.2"
+jobs:
+  windows-x64:
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: git make diffutils pkgconf nasm yasm mingw-w64-x86_64-toolchain mingw-w64-x86_64-meson mingw-w64-x86_64-ninja mingw-w64-x86_64-cmake mingw-w64-x86_64-python
+      - run: bash scripts/build-windows-x64.sh
+      - shell: pwsh
+        run: Compress-Archive -Path dist/windows-x64/* -DestinationPath ffmpeg-$env:FFMPEG_VERSION-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ env.FFMPEG_VERSION }}-windows-x64
+          path: ffmpeg-${{ env.FFMPEG_VERSION }}-windows-x64.zip
+
+  windows-arm64-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y build-essential git curl xz-utils meson ninja-build pkg-config python3
+      - run: bash scripts/build-windows-arm64.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-arm64-unvalidated
+          path: dist/windows-arm64
+
+  windows-arm64-validate:
+    needs: windows-arm64-build
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-arm64-unvalidated
+          path: dist/windows-arm64
+      - name: Validate native ARM64 build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ff = (Resolve-Path "dist/windows-arm64/ffmpeg.exe").Path
+          $enc = & $ff -hide_banner -encoders 2>&1 | Out-String
+          $dec = & $ff -hide_banner -decoders 2>&1 | Out-String
+          foreach ($e in @("libx264","h264_mf")) { if ($enc -notmatch "\b$e\b") { throw "Missing encoder $e" } }
+          foreach ($e in @("h264_nvenc","h264_qsv","h264_amf")) { if ($enc -match "\b$e\b") { throw "Forbidden encoder present: $e" } }
+          if ($dec -notmatch "\blibdav1d\b") { throw "Missing decoder libdav1d" }
+          & $ff -hide_banner -loglevel error -f lavfi -i "testsrc2=size=320x180:rate=30" -t 1 -c:v libx264 -pix_fmt yuv420p -y "$env:TEMP\x264.mp4"
+          & $ff -version | Out-File -Append dist/windows-arm64/build-info.txt
+          & $ff -buildconf | Out-File -Append dist/windows-arm64/build-info.txt
+          Get-FileHash dist/windows-arm64/ffmpeg.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  ffmpeg.exe" } | Set-Content dist/windows-arm64/SHA256SUMS
+          Get-FileHash dist/windows-arm64/ffprobe.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  ffprobe.exe" } | Add-Content dist/windows-arm64/SHA256SUMS
+          Compress-Archive -Path dist/windows-arm64/* -DestinationPath ffmpeg-$env:FFMPEG_VERSION-windows-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ env.FFMPEG_VERSION }}-windows-arm64
+          path: ffmpeg-${{ env.FFMPEG_VERSION }}-windows-arm64.zip
+
+  macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, target: macos-x64, runner: macos-15-intel }
+          - { arch: arm64, target: macos-arm64, runner: macos-15 }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install meson ninja pkg-config nasm
+      - run: bash scripts/build-macos.sh "${{ matrix.arch }}"
+      - run: tar -C dist -cJf "ffmpeg-$FFMPEG_VERSION-${{ matrix.target }}.tar.xz" "${{ matrix.target }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ matrix.target }}
+          path: ffmpeg-${{ env.FFMPEG_VERSION }}-${{ matrix.target }}.tar.xz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raw-${{ matrix.target }}
+          path: dist/${{ matrix.target }}
+
+  macos-universal2:
+    needs: macos
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: raw-macos-x64, path: x64 }
+      - uses: actions/download-artifact@v4
+        with: { name: raw-macos-arm64, path: arm64 }
+      - run: |
+          mkdir -p dist/macos-universal2/LICENSES
+          lipo -create x64/ffmpeg arm64/ffmpeg -output dist/macos-universal2/ffmpeg
+          lipo -create x64/ffprobe arm64/ffprobe -output dist/macos-universal2/ffprobe
+          lipo -info dist/macos-universal2/ffmpeg | tee dist/macos-universal2/build-info.txt
+          cp -R arm64/LICENSES/. dist/macos-universal2/LICENSES/
+          (cd dist/macos-universal2 && shasum -a 256 ffmpeg ffprobe > SHA256SUMS)
+          tar -C dist -cJf "ffmpeg-$FFMPEG_VERSION-macos-universal2.tar.xz" macos-universal2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-${{ env.FFMPEG_VERSION }}-macos-universal2
+          path: ffmpeg-${{ env.FFMPEG_VERSION }}-macos-universal2.tar.xz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows-x64, windows-arm64-validate, macos-universal2]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ffmpeg-${{ env.FFMPEG_VERSION }}-*
+          merge-multiple: true
+          path: release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
