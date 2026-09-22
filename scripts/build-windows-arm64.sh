@@ -37,19 +37,19 @@ EOF
 
 clone_checkout https://code.videolan.org/videolan/x264.git "$X264_COMMIT" "$WORK/x264-$TARGET"
 pushd "$WORK/x264-$TARGET"
-./configure --prefix="$PREFIX" --host=aarch64-w64-mingw32 --cross-prefix=aarch64-w64-mingw32- --enable-static --disable-shared --disable-cli
+./configure --prefix="$PREFIX" --host=aarch64-w64-mingw32 --cross-prefix=aarch64-w64-mingw32- --enable-static --disable-cli
 make -j"$(nproc)" && make install
 popd
 
 clone_checkout https://code.videolan.org/videolan/dav1d.git "$DAV1D_VERSION" "$WORK/dav1d-$TARGET"
 pushd "$WORK/dav1d-$TARGET"
 meson setup build --wipe --cross-file "$CROSS" --prefix="$PREFIX" --default-library=static -Denable_tools=false -Denable_tests=false
-ninja -C build -j"$(nproc)" && DESTDIR="" ninja -C build install
+ninja -C build -j"$(nproc)" && ninja -C build install
 popd
 
 clone_checkout https://git.ffmpeg.org/ffmpeg.git "$FFMPEG_TAG" "$WORK/ffmpeg-$TARGET"
 pushd "$WORK/ffmpeg-$TARGET"
-./configure --prefix="$PREFIX/ffmpeg" --target-os=mingw32 --arch=aarch64 --cross-prefix=aarch64-w64-mingw32- --cc="$CC" --cxx="$CXX" --enable-cross-compile --enable-gpl --enable-libx264 --enable-libdav1d --enable-mediafoundation --disable-nvenc --disable-libvpl --disable-amf --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" --pkg-config-flags=--static --disable-ffplay --disable-debug
+./configure --prefix="$PREFIX/ffmpeg" --target-os=mingw32 --arch=aarch64 --cross-prefix=aarch64-w64-mingw32- --cc="$CC" --cxx="$CXX" --pkg-config=pkg-config --enable-cross-compile --enable-gpl --enable-libx264 --enable-libdav1d --enable-mediafoundation --disable-nvenc --disable-libvpl --disable-amf --extra-cflags="-I$PREFIX/include" --extra-ldflags="-L$PREFIX/lib" --pkg-config-flags=--static --disable-ffplay --disable-debug
 make -j"$(nproc)" && make install
 popd
 cp "$PREFIX/ffmpeg/bin/ffmpeg.exe" "$PREFIX/ffmpeg/bin/ffprobe.exe" "$OUT/"
