@@ -20,7 +20,7 @@ rm -rf "$PREFIX" "$OUT"; mkdir -p "$PREFIX" "$OUT"
 
 clone_checkout https://code.videolan.org/videolan/x264.git "$X264_COMMIT" "$WORK/x264-$TARGET"
 pushd "$WORK/x264-$TARGET"
-./configure --prefix="$PREFIX" --host="$ARCH-apple-darwin" --enable-static --disable-shared --disable-cli
+./configure --prefix="$PREFIX" --host="$ARCH-apple-darwin" --enable-static --disable-cli
 make -j"$(sysctl -n hw.ncpu)" && make install
 popd
 
@@ -39,7 +39,7 @@ popd
 cp "$PREFIX/ffmpeg/bin/ffmpeg" "$PREFIX/ffmpeg/bin/ffprobe" "$OUT/"
 write_manifest "$OUT" "$TARGET"
 collect_licenses "$OUT" "FFmpeg-GPL:$WORK/ffmpeg-$TARGET/COPYING.GPLv3" "x264-COPYING:$WORK/x264-$TARGET/COPYING" "dav1d-COPYING:$WORK/dav1d-$TARGET/COPYING"
-"$ROOT/scripts/verify.sh" "$OUT/ffmpeg" "$TARGET" "$OUT/build-info.txt"
+bash "$ROOT/scripts/verify.sh" "$OUT/ffmpeg" "$TARGET" "$OUT/build-info.txt"
 otool -L "$OUT/ffmpeg" >> "$OUT/build-info.txt"
 file "$OUT/ffmpeg" >> "$OUT/build-info.txt"
 (cd "$OUT" && shasum -a 256 ffmpeg ffprobe > SHA256SUMS)
